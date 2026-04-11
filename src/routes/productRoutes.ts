@@ -46,7 +46,7 @@ router.get(
 /**
  * @access public
  * @route GET /all-filters
- * @desc Get all filter options with values (categories, metals, price ranges, etc.)
+ * @desc Get all filter options with values (categories, stoneTypes, colors, shapes, price ranges, etc.)
  */
 router.get(
   '/all-filters',

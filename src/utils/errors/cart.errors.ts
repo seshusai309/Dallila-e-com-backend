@@ -23,8 +23,3 @@ export class InsufficientStockError extends AppError {
   }
 }
 
-export class InsufficientVariantImagesError extends AppError {
-  constructor(message: string = 'This product variant must have at least 2 images before it can be added to the cart') {
-    super(message, 'INSUFFICIENT_VARIANT_IMAGES', 400);
-  }
-}

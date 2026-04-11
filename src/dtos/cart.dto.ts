@@ -8,12 +8,6 @@ export class CartItemDto {
   productId!: string;
 
   @Expose()
-  variantId!: string;
-
-  @Expose()
-  variant_name!: string;
-
-  @Expose()
   sku!: string;
 
   @Expose()

@@ -63,11 +63,3 @@ export class InsufficientStockError extends AppError {
   }
 }
 
-export class InsufficientVariantImagesError extends AppError {
-  constructor(productName?: string) {
-    const msg = productName
-      ? `Variant of "${productName}" must have at least 2 images before an order can be placed`
-      : 'A product variant must have at least 2 images before an order can be placed';
-    super(msg, 'INSUFFICIENT_VARIANT_IMAGES', 400);
-  }
-}

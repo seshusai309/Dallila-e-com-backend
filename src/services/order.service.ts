@@ -15,7 +15,6 @@ import {
   OrderAlreadyPaidError,
   PaymentInProgressError,
   InsufficientStockError,
-  InsufficientVariantImagesError
 } from "../utils/errors/order.errors";
 import { CartNotFoundError } from "../utils/errors/cart.errors";
 
@@ -117,39 +116,24 @@ export class OrderService {
         throw new Error(`Product ${cartItem.productId} not found`);
       }
 
-      const variant = product.variants.find(
-        (v) => v._id.toString() === cartItem.variantId,
-      );
-      if (!variant) {
-        throw new Error(
-          `Variant ${cartItem.variantId} not found on product ${product.title}`,
-        );
-      }
-
-      if (variant.stock < cartItem.quantity) {
+      if (product.stock < cartItem.quantity) {
         throw new InsufficientStockError(
-          variant.stock,
+          product.stock,
           cartItem.quantity,
           product.title,
         );
       }
 
-      if (variant.images.length < 2) {
-        throw new InsufficientVariantImagesError(product.title);
-      }
-
       orderItems.push({
         productId: product._id.toString(),
-        variantId: variant._id.toString(),
-        variant_name: variant.variant_name,
-        sku: variant.sku,
+        sku: product.sku,
         title: product.title,
-        price: variant.price,
+        price: product.price,
         quantity: cartItem.quantity,
-        thumbnail: variant.thumbnail,
+        thumbnail: product.thumbnail,
       });
 
-      totalAmount += variant.price * cartItem.quantity;
+      totalAmount += product.price * cartItem.quantity;
       totalItems += cartItem.quantity;
     }
 

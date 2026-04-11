@@ -37,7 +37,7 @@ router.post(
 /**
  * @access public (optional auth for guests)
  * @route PUT /item/:productId
- * @desc Update cart item quantity for a product (updates first variant or all variants)
+ * @desc Update cart item quantity for a product
  */
 router.put(
   '/item/:productId',
@@ -49,24 +49,11 @@ router.put(
 
 /**
  * @access public (optional auth for guests)
- * @route PUT /item/:productId/:variantId
- * @desc Update cart item quantity for a specific variant
- */
-router.put(
-  '/item/:productId/:variantId',
-  rateLimiter({ max: 20 }),
-  authenticateToken,
-  validate(UpdateCartItemSchema),
-  cartController.updateCartItem.bind(cartController)
-);
-
-/**
- * @access public (optional auth for guests)
- * @route DELETE /item/:productId/:variantId
- * @desc Remove a specific variant item from cart
+ * @route DELETE /item/:productId
+ * @desc Remove item from cart
  */
 router.delete(
-  '/item/:productId/:variantId',
+  '/item/:productId',
   rateLimiter({ max: 20 }),
   authenticateToken,
   cartController.removeFromCart.bind(cartController)

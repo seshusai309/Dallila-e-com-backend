@@ -1,12 +1,10 @@
 import { CartRepository } from '../repository/CartRepository';
 import { ProductRepository } from '../repository/ProductRepository';
 import { Cart, CartItem } from '../models/Cart';
-import { CartNotFoundError, ProductNotFoundError, InsufficientStockError, InsufficientVariantImagesError } from '../utils/errors/cart.errors';
+import { CartNotFoundError, ProductNotFoundError, InsufficientStockError } from '../utils/errors/cart.errors';
 
 export interface CartItemInput {
   productId: string;
-  variantId: string;
-  variant_name: 'gold' | 'silver' | 'rose gold';
   sku: string;
   title: string;
   price: number;
@@ -23,7 +21,6 @@ export interface CartStats {
 
 export interface ValidationResult {
   productId: string;
-  variantId: string;
   title: string;
   available: boolean;
   reason?: string;
@@ -84,10 +81,6 @@ export class CartService {
       cart = await this.cartRepository.findByUserId(userId);
     }
 
-    // if (!cart && guestId) {
-    //   cart = await this.cartRepository.findById(guestId);
-    // }
-
     if (!cart) {
       cart = await this.cartRepository.create({
         userId,
@@ -103,37 +96,25 @@ export class CartService {
   /**
    * Add item to cart
    */
-  async addToCart(cartId: string, productId: string, variantId: string, quantity: number = 1): Promise<Cart> {
+  async addToCart(cartId: string, productId: string, quantity: number = 1): Promise<Cart> {
     // Get product details
     const product = await this.productRepository.findById(productId);
     if (!product) {
       throw new ProductNotFoundError();
     }
 
-    // Find the specified variant
-    const variant = product.variants.find(v => v._id.toString() === variantId);
-    if (!variant) {
-      throw new Error(`Variant ${variantId} not found on product`);
-    }
-
-    if (variant.stock < quantity) {
-      throw new InsufficientStockError(variant.stock, quantity);
-    }
-
-    if (variant.images.length < 2) {
-      throw new InsufficientVariantImagesError();
+    if (product.stock < quantity) {
+      throw new InsufficientStockError(product.stock, quantity);
     }
 
     // Create cart item
     const cartItem: CartItem = {
       productId: product._id.toString(),
-      variantId: variant._id.toString(),
-      variant_name: variant.variant_name,
-      sku: variant.sku,
+      sku: product.sku,
       title: product.title,
-      price: variant.price,
+      price: product.price,
       quantity,
-      thumbnail: variant.thumbnail || variant.images?.[0]?.src || '',
+      thumbnail: product.thumbnail || product.images?.[0]?.src || '',
       addedAt: new Date(),
     };
 
@@ -149,24 +130,19 @@ export class CartService {
   /**
    * Update cart item quantity
    */
-  async updateCartItem(cartId: string, productId: string, variantId: string, quantity: number): Promise<Cart> {
+  async updateCartItem(cartId: string, productId: string, quantity: number): Promise<Cart> {
     // Check if product exists and has enough stock
     const product = await this.productRepository.findById(productId);
     if (!product) {
       throw new ProductNotFoundError();
     }
 
-    const variant = product.variants.find(v => v._id.toString() === variantId);
-    if (!variant) {
-      throw new Error(`Variant ${variantId} not found on product`);
-    }
-
-    if (variant.stock < quantity) {
-      throw new InsufficientStockError(variant.stock, quantity);
+    if (product.stock < quantity) {
+      throw new InsufficientStockError(product.stock, quantity);
     }
 
     // Update cart item
-    const updatedCart = await this.cartRepository.updateItemQuantity(cartId, productId, variantId, quantity);
+    const updatedCart = await this.cartRepository.updateItemQuantity(cartId, productId, quantity);
     if (!updatedCart) {
       throw new CartNotFoundError('Cart item not found');
     }
@@ -175,7 +151,7 @@ export class CartService {
   }
 
   /**
-   * Update cart item quantity by productId (updates first variant found)
+   * Update cart item quantity by productId
    */
   async updateCartItemByProduct(cartId: string, productId: string, quantity: number): Promise<Cart> {
     // Check if product exists
@@ -184,29 +160,12 @@ export class CartService {
       throw new ProductNotFoundError();
     }
 
-    // Find the first variant of this product in the cart
-    const cart = await this.cartRepository.findById(cartId);
-    if (!cart) {
-      throw new CartNotFoundError('Cart not found');
-    }
-
-    const cartItem = cart.items.find(item => item.productId === productId);
-    if (!cartItem) {
-      throw new CartNotFoundError('Cart item not found');
-    }
-
-    // Check if the variant has enough stock
-    const variant = product.variants.find(v => v._id.toString() === cartItem.variantId);
-    if (!variant) {
-      throw new Error(`Variant ${cartItem.variantId} not found on product`);
-    }
-
-    if (variant.stock < quantity) {
-      throw new InsufficientStockError(variant.stock, quantity);
+    if (product.stock < quantity) {
+      throw new InsufficientStockError(product.stock, quantity);
     }
 
     // Update cart item
-    const updatedCart = await this.cartRepository.updateItemQuantity(cartId, productId, cartItem.variantId, quantity);
+    const updatedCart = await this.cartRepository.updateItemQuantity(cartId, productId, quantity);
     if (!updatedCart) {
       throw new CartNotFoundError('Cart item not found');
     }
@@ -217,8 +176,8 @@ export class CartService {
   /**
    * Remove item from cart
    */
-  async removeFromCart(cartId: string, productId: string, variantId: string): Promise<Cart> {
-    const updatedCart = await this.cartRepository.removeItem(cartId, productId, variantId);
+  async removeFromCart(cartId: string, productId: string): Promise<Cart> {
+    const updatedCart = await this.cartRepository.removeItem(cartId, productId);
     if (!updatedCart) {
       throw new CartNotFoundError('Item not found in cart');
     }
@@ -248,24 +207,6 @@ export class CartService {
   }
 
   /**
-   * Get all guest carts (admin only)
-   */
-  // async getAllGuestCarts(): Promise<Cart[]> {
-  //   return await this.cartRepository.findAllGuestCarts();
-  // }
-
-  /**
-   * Merge guest cart with user cart
-   */
-  // async mergeGuestCart(guestId: string, userId: string): Promise<Cart> {
-  //   const mergedCart = await this.cartRepository.mergeGuestCart(guestId, userId);
-  //   if (!mergedCart) {
-  //     throw new CartNotFoundError('Guest cart not found');
-  //   }
-  //   return mergedCart;
-  // }
-
-  /**
    * Validate cart items (check stock availability)
    */
   async validateCart(cartId: string): Promise<CartValidationResult> {
@@ -282,7 +223,6 @@ export class CartService {
       if (!product) {
         validationResults.push({
           productId: item.productId,
-          variantId: item.variantId,
           title: item.title,
           available: false,
           reason: 'Product not found',
@@ -290,34 +230,22 @@ export class CartService {
         continue;
       }
 
-      const variant = product.variants.find(v => v._id.toString() === item.variantId);
-
-      if (!variant) {
+      if (product.stock < item.quantity) {
         validationResults.push({
           productId: item.productId,
-          variantId: item.variantId,
-          title: item.title,
-          available: false,
-          reason: 'Variant not found',
-        });
-      } else if (variant.stock < item.quantity) {
-        validationResults.push({
-          productId: item.productId,
-          variantId: item.variantId,
           title: item.title,
           available: false,
           reason: 'Insufficient stock',
-          availableStock: variant.stock,
+          availableStock: product.stock,
           requestedQuantity: item.quantity,
         });
       } else {
         validationResults.push({
           productId: item.productId,
-          variantId: item.variantId,
           title: item.title,
           available: true,
-          currentPrice: variant.price,
-          stock: variant.stock,
+          currentPrice: product.price,
+          stock: product.stock,
         });
       }
     }
@@ -343,7 +271,7 @@ export class CartService {
     // Populate user details
     const { User } = await import('../models/User');
     const user = await User.findById(userId).select('username email phoneNumber').lean();
-    
+
     // Add user details to cart object
     (cart as any).userDetails = {
       userName: user?.username || 'Unknown',

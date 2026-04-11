@@ -168,76 +168,28 @@ export class ProductRepository {
         }
       }
 
-      // Build base query for products
-      let productsQuery = ProductModel.find(query);
-
-      // Handle price range filters - need to filter based on variant prices
+      // Handle price range filters directly on the price field
       if (filters?.price_min !== undefined || filters?.price_max !== undefined) {
-        const priceFilter: any = {};
+        query.price = {};
         if (filters?.price_min !== undefined) {
           const priceMin = parseFloat(filters.price_min);
-          if (!isNaN(priceMin)) {
-            priceFilter.$gte = priceMin;
-          }
+          if (!isNaN(priceMin)) query.price.$gte = priceMin;
         }
         if (filters?.price_max !== undefined) {
           const priceMax = parseFloat(filters.price_max);
-          if (!isNaN(priceMax)) {
-            priceFilter.$lte = priceMax;
-          }
+          if (!isNaN(priceMax)) query.price.$lte = priceMax;
         }
-
-        // Only apply price filter if it's valid
-        if (Object.keys(priceFilter).length > 0) {
-          productsQuery = productsQuery.where('variants.price').gte(priceFilter.$gte || 0);
-          if (priceFilter.$lte !== undefined) {
-            productsQuery = productsQuery.where('variants.price').lte(priceFilter.$lte);
-          }
-        }
+        if (Object.keys(query.price).length === 0) delete query.price;
       }
 
-      // Handle metal filter - filter by variant_name
-      if (filters?.metal) {
-        const metals = Array.isArray(filters.metal) ? filters.metal : [filters.metal];
-        if (metals.length > 0) {
-          productsQuery = productsQuery.where('variants.variant_name').in(metals);
-        }
-      }
-
-      const products = await productsQuery
+      const products = await ProductModel.find(query)
         .skip(skip)
         .limit(limit)
         .sort({ createdAt: -1 });
 
-      // Additional filtering for price range if needed (since MongoDB can't directly filter nested arrays with range)
-      let filteredProducts = products;
-      if (filters?.price_min !== undefined || filters?.price_max !== undefined) {
-        const priceMin = filters?.price_min ? parseFloat(filters.price_min) : 0;
-        const priceMax = filters?.price_max ? parseFloat(filters.price_max) : Infinity;
-
-        filteredProducts = products.filter(product => {
-          if (!isNaN(priceMin) && priceMin > 0) {
-            return product.variants.some(variant => variant.price >= priceMin && 
-              (isNaN(priceMax) || priceMax === Infinity || variant.price <= priceMax));
-          }
-          if (!isNaN(priceMax) && priceMax !== Infinity) {
-            return product.variants.some(variant => variant.price <= priceMax);
-          }
-          return true;
-        });
-      }
-
-      // Additional filtering for metal if needed (ensure products have at least one variant with the specified metal)
-      if (filters?.metal) {
-        const metals = Array.isArray(filters.metal) ? filters.metal : [filters.metal];
-        filteredProducts = filteredProducts.filter(product => {
-          return product.variants.some(variant => metals.includes(variant.variant_name));
-        });
-      }
-
       const total = await ProductModel.countDocuments(query);
 
-      return { products: filteredProducts, total };
+      return { products, total };
     } catch (error: any) {
       logger.error('ProductRepository', 'findAll', `Failed to get products: ${error.message}`);
       throw error;
@@ -459,7 +411,6 @@ export class ProductRepository {
     measurements: string[];
     vendors: string[];
     tags: string[];
-    metals: string[];
     priceRange: { min: number; max: number };
     ratingRange: { min: number; max: number };
     caratRange: { min: number; max: number };
@@ -491,8 +442,7 @@ export class ProductRepository {
         ProductModel.distinct('vendor'),
         ProductModel.distinct('tags').then(tags => tags.flat()),
         ProductModel.aggregate([
-          { $unwind: '$variants' },
-          { $group: { _id: null, min: { $min: '$variants.price' }, max: { $max: '$variants.price' } } }
+          { $group: { _id: null, min: { $min: '$price' }, max: { $max: '$price' } } }
         ]),
         ProductModel.aggregate([
           { $group: { _id: null, min: { $min: '$rating' }, max: { $max: '$rating' } } }
@@ -501,9 +451,6 @@ export class ProductRepository {
           { $group: { _id: null, min: { $min: '$carat' }, max: { $max: '$carat' } } }
         ])
       ]);
-
-      // Get metals from variants
-      const metals = await ProductModel.distinct('variants.variant_name');
 
       // Flatten tags array
       const flattenedTags = Array.isArray(tags) ? tags.flat().filter(Boolean) : [];
@@ -537,7 +484,6 @@ export class ProductRepository {
         measurements: measurements.filter(Boolean).sort(),
         vendors: vendors.filter(Boolean).sort(),
         tags: flattenedTags.sort(),
-        metals: metals.filter(Boolean).sort(),
         priceRange,
         ratingRange,
         caratRange

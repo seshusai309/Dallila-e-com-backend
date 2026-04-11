@@ -8,6 +8,9 @@ export class OrderItemDto {
   productId!: string;
 
   @Expose()
+  sku!: string;
+
+  @Expose()
   title!: string;
 
   @Expose()

@@ -2,8 +2,6 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface OrderItem {
   productId: string; // MongoDB _id
-  variantId: string; // Variant _id
-  variant_name: 'gold' | 'silver' | 'rose gold';
   sku: string;
   title: string;
   price: number;
@@ -48,8 +46,6 @@ export interface Order extends Document {
 
 const orderItemSchema = new Schema({
   productId: { type: String, required: true }, // MongoDB _id
-  variantId: { type: String, required: true }, // Variant _id
-  variant_name: { type: String, required: true, enum: ['gold', 'silver', 'rose gold'] },
   sku: { type: String, required: true },
   title: { type: String, required: true },
   price: { type: Number, required: true },
@@ -72,10 +68,10 @@ const orderSchema = new Schema<Order>({
   totalAmount: { type: Number, required: true },
   totalItems: { type: Number, required: true },
   shippingAddress: { type: shippingAddressSchema, required: true },
-  paymentMethod: { 
-    type: String, 
-    required: true, 
-    enum: ["ONLINE", "COD"] 
+  paymentMethod: {
+    type: String,
+    required: true,
+    enum: ["ONLINE", "COD"]
   },
   paymentStatus: {
     type: String,
@@ -83,9 +79,9 @@ const orderSchema = new Schema<Order>({
     enum: ["PENDING", "PROCESSING", "PAID", "REFUNDED"],
     default: "PENDING"
   },
-  orderStatus: { 
-    type: String, 
-    required: true, 
+  orderStatus: {
+    type: String,
+    required: true,
     enum: ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"],
     default: "PENDING"
   },

@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { plainToInstance } from 'class-transformer';
 import { CartResponseDto, CartStatsDto } from '../dtos/cart.dto';
 import { createPaginatedResponse, parsePaginationParams } from '../utils/pagination';
-import { CartNotFoundError, ProductNotFoundError, InsufficientStockError, InsufficientVariantImagesError } from '../utils/errors/cart.errors';
+import { CartNotFoundError, ProductNotFoundError, InsufficientStockError } from '../utils/errors/cart.errors';
 import { Cart } from '../models/Cart';
 
 export class CartController {
@@ -56,12 +56,12 @@ export class CartController {
   // Add item to cart
   async addToCart(req: Request, res: Response): Promise<void> {
     try {
-      const { productId, variantId, quantity = 1 } = req.body;
+      const { productId, quantity = 1 } = req.body;
 
       // Get or create cart
       const cart = await this.getOrCreateCart(req);
 
-      const updatedCart = await this.cartService.addToCart(cart._id.toString(), productId, variantId, quantity);
+      const updatedCart = await this.cartService.addToCart(cart._id.toString(), productId, quantity);
 
       logger.success(req.user?._id?.toString() || 'anonymous', 'addToCart', `Added ${quantity} items to cart`);
 
@@ -74,13 +74,6 @@ export class CartController {
         data: cartDto
       });
     } catch (error: any) {
-      if (error instanceof InsufficientVariantImagesError) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'INSUFFICIENT_VARIANT_IMAGES', message: error.message }
-        });
-        return;
-      }
       logger.error(req.user?._id?.toString() || 'anonymous', 'addToCart', `Failed to add item to cart: ${error.message}`);
       res.status(500).json({
         success: false,
@@ -95,18 +88,17 @@ export class CartController {
   // Update item quantity in cart
   async updateCartItem(req: Request, res: Response): Promise<void> {
     try {
-      const { productId, variantId } = req.params;
+      const { productId } = req.params;
       const productIdStr = Array.isArray(productId) ? productId[0] : productId;
-      const variantIdStr = Array.isArray(variantId) ? variantId[0] : variantId;
       const { quantity } = req.body;
 
       // Get cart
       const cart = await this.getOrCreateCart(req);
 
       // Update cart item
-      const updatedCart = await this.cartService.updateCartItem(cart._id.toString(), productIdStr, variantIdStr, quantity);
+      const updatedCart = await this.cartService.updateCartItem(cart._id.toString(), productIdStr, quantity);
 
-      logger.success(req.user?._id?.toString() || 'anonymous', 'updateCartItem', `Updated quantity for product ${productIdStr} variant ${variantIdStr} to ${quantity}`);
+      logger.success(req.user?._id?.toString() || 'anonymous', 'updateCartItem', `Updated quantity for product ${productIdStr} to ${quantity}`);
 
       const cartDto = plainToInstance(CartResponseDto, updatedCart.toObject(), { excludeExtraneousValues: true });
 
@@ -128,7 +120,7 @@ export class CartController {
     }
   }
 
-  // Update item quantity in cart by productId (updates first variant or all variants)
+  // Update item quantity in cart by productId
   async updateCartItemByProduct(req: Request, res: Response): Promise<void> {
     try {
       const { productId } = req.params;
@@ -188,15 +180,14 @@ export class CartController {
   // Remove item from cart
   async removeFromCart(req: Request, res: Response): Promise<void> {
     try {
-      const { productId, variantId } = req.params;
+      const { productId } = req.params;
       const productIdStr = Array.isArray(productId) ? productId[0] : productId;
-      const variantIdStr = Array.isArray(variantId) ? variantId[0] : variantId;
 
       // Get cart
       const cart = await this.getOrCreateCart(req);
 
       // Remove item from cart
-      const updatedCart = await this.cartService.removeFromCart(cart._id.toString(), productIdStr, variantIdStr);
+      const updatedCart = await this.cartService.removeFromCart(cart._id.toString(), productIdStr);
 
       if (!updatedCart) {
         res.status(404).json({
@@ -209,7 +200,7 @@ export class CartController {
         return;
       }
 
-      logger.success(req.user?._id?.toString() || 'anonymous', 'removeFromCart', `Removed product ${productIdStr} variant ${variantIdStr} from cart`);
+      logger.success(req.user?._id?.toString() || 'anonymous', 'removeFromCart', `Removed product ${productIdStr} from cart`);
 
       const cartDto = plainToInstance(CartResponseDto, updatedCart.toObject(), { excludeExtraneousValues: true });
 

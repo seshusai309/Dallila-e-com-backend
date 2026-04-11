@@ -41,9 +41,9 @@ export class CartRepository {
         return null;
       }
 
-      // Check if the same product+variant combination already exists
+      // Check if the same product already exists
       const existingItemIndex = cart.items.findIndex(
-        cartItem => cartItem.productId === item.productId && cartItem.variantId === item.variantId
+        cartItem => cartItem.productId === item.productId
       );
 
       if (existingItemIndex >= 0) {
@@ -66,7 +66,7 @@ export class CartRepository {
   }
 
   // Update item quantity in cart
-  async updateItemQuantity(cartId: string, productId: string, variantId: string, quantity: number): Promise<Cart | null> {
+  async updateItemQuantity(cartId: string, productId: string, quantity: number): Promise<Cart | null> {
     try {
       const cart = await CartModel.findById(cartId);
       if (!cart) {
@@ -74,7 +74,7 @@ export class CartRepository {
       }
 
       const itemIndex = cart.items.findIndex(
-        item => item.productId === productId && item.variantId === variantId
+        item => item.productId === productId
       );
       if (itemIndex === -1) {
         return null;
@@ -100,7 +100,7 @@ export class CartRepository {
   }
 
   // Remove item from cart
-  async removeItem(cartId: string, productId: string, variantId: string): Promise<Cart | null> {
+  async removeItem(cartId: string, productId: string): Promise<Cart | null> {
     try {
       const cart = await CartModel.findById(cartId);
       if (!cart) {
@@ -108,7 +108,7 @@ export class CartRepository {
       }
 
       cart.items = cart.items.filter(
-        item => !(item.productId === productId && item.variantId === variantId)
+        item => item.productId !== productId
       );
 
       // Recalculate totals

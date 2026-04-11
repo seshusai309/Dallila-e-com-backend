@@ -1,13 +1,13 @@
 import { Request, Response } from 'express';
 import { plainToInstance } from 'class-transformer';
 import { ProductService, CreateProductInput, UpdateProductInput } from '../services/product.service';
-import { ProductResponseDto, ProductStatsDto, ProductListItemDto, ProductOptionDto } from '../dtos/product.dto';
+import { ProductResponseDto, ProductStatsDto, ProductListItemDto } from '../dtos/product.dto';
 import { logger } from '../utils/logger';
 import { createPaginatedResponse, parsePaginationParams } from '../utils/pagination';
 import { ProductNotFoundError, InvalidProductDataError, ImageMappingError } from '../utils/errors/product.errors';
 
 // Available query filters advertised to clients
-const AVAILABLE_FILTERS = ['search', 'category', 'page', 'limit', 'stoneType', 'color', 'shape', 'carat', 'origin', 'treatment', 'availability', 'certificate', 'measurement', 'details', 'vendor', 'tags', 'is_featured', 'price_min', 'price_max', 'rating_min', 'rating_max', 'metal'];
+const AVAILABLE_FILTERS = ['search', 'category', 'page', 'limit', 'stoneType', 'color', 'shape', 'carat', 'origin', 'treatment', 'availability', 'certificate', 'measurement', 'details', 'vendor', 'tags', 'is_featured', 'price_min', 'price_max', 'rating_min', 'rating_max'];
 
 export class ProductController {
   private productService: ProductService;
@@ -19,64 +19,6 @@ export class ProductController {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   /**
-   * Parse variants sent as bracket notation in multipart form-data.
-   *
-   * multer does NOT interpret bracket notation, so keys like
-   *   variants[0][title]  →  req.body["variants[0][title]"]
-   *
-   * This method reconstructs them into an ordered array of objects.
-   */
-  private parseVariantFields(body: Record<string, any>): Record<string, any>[] {
-    // 1. variants already a parsed array (application/json body)
-    if (body.variants && Array.isArray(body.variants)) {
-      return body.variants;
-    }
-
-    // 2. variants as a JSON string (form-data)
-    if (body.variants && typeof body.variants === 'string') {
-      try {
-        const parsed = JSON.parse(body.variants);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        throw new Error('Invalid variants JSON format');
-      }
-    }
-
-    // 3. Bracket notation: variants[0][price]=1200  OR  "variants[0]": { price: 1200 }
-    const map: Record<number, Record<string, any>> = {};
-
-    for (const key of Object.keys(body)) {
-      // variants[0][field] — individual form-data fields
-      const deepMatch = key.match(/^variants\[(\d+)\]\[(\w+)\]$/);
-      if (deepMatch) {
-        const idx = parseInt(deepMatch[1], 10);
-        const field = deepMatch[2];
-        if (!map[idx]) map[idx] = {};
-        map[idx][field] = body[key];
-        continue;
-      }
-
-      // "variants[0]" as a literal key with an object value (JSON body)
-      const shallowMatch = key.match(/^variants\[(\d+)\]$/);
-      if (
-        shallowMatch &&
-        typeof body[key] === 'object' &&
-        body[key] !== null &&
-        !Array.isArray(body[key])
-      ) {
-        const idx = parseInt(shallowMatch[1], 10);
-        if (!map[idx]) map[idx] = {};
-        Object.assign(map[idx], body[key]);
-      }
-    }
-
-    return Object.keys(map)
-      .map(Number)
-      .sort((a, b) => a - b)
-      .map((k) => ({ ...map[k], _variantIndex: k }));
-  }
-
-  /**
    * Parse a value that may arrive as a comma-separated string or an array.
    */
   private parseStringArray(value: string | string[] | undefined): string[] {
@@ -86,95 +28,42 @@ export class ProductController {
   }
 
   /**
-   * Parse imageMapping from JSON string.
-   * Throws a 400-compatible error on malformed JSON.
+   * Parse imageMapping from JSON string (flat array of indices for product images).
    */
-  private parseImageMapping(raw: string | undefined): number[][] {
+  private parseImageMapping(raw: string | undefined): number[] {
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('imageMapping must be a JSON array');
       return parsed;
     } catch {
-      throw new ImageMappingError('imageMapping must be a valid JSON array, e.g. [[0,1],[2,3]]');
+      throw new ImageMappingError('imageMapping must be a valid JSON array, e.g. [0,1,2]');
     }
-  }
-
-  /**
-   * Validate and coerce the raw variant records extracted from form-data.
-   * Returns a typed array or throws a descriptive error.
-   */
-  private coerceVariants(
-    raw: Record<string, string>[],
-  ): CreateProductInput['variants'] {
-    const VALID_NAMES = ['gold', 'silver', 'rose gold'];
-    return raw.map((v, i) => {
-      if (!v.title?.trim()) throw { field: `variants[${i}].title`, message: 'Variant title is required' };
-      if (!VALID_NAMES.includes(v.variant_name)) {
-        throw { field: `variants[${i}].variant_name`, message: 'variant_name must be gold, silver, or rose gold' };
-      }
-      if (!v.sku?.trim()) throw { field: `variants[${i}].sku`, message: 'Variant SKU is required' };
-      if (!v.price) throw { field: `variants[${i}].price`, message: 'Variant price is required' };
-
-      return {
-        ...(v._id ? { _id: v._id } : {}),
-        title: v.title.trim(),
-        variant_name: v.variant_name as 'gold' | 'silver' | 'rose gold',
-        sku: v.sku.trim(),
-        stock: parseInt(v.stock ?? '0', 10) || 0,
-        price: parseFloat(v.price),
-        position: v.position ? parseInt(v.position, 10) : undefined,
-      };
-    });
-  }
-
-  /**
-   * Coerce raw variant records for UPDATE — all fields are optional.
-   * Only validates variant_name when provided.
-   */
-  private coerceVariantsForUpdate(raw: Record<string, any>[]): UpdateProductInput['variants'] {
-    const VALID_NAMES = ['gold', 'silver', 'rose gold'];
-    return raw.map((v, i) => {
-      if (v.variant_name !== undefined && !VALID_NAMES.includes(v.variant_name)) {
-        throw { field: `variants[${i}].variant_name`, message: 'variant_name must be gold, silver, or rose gold' };
-      }
-      const result: any = {};
-      if (v._id !== undefined) result._id = v._id;
-      if (v._variantIndex !== undefined) result._variantIndex = v._variantIndex;
-      if (v.title !== undefined) result.title = String(v.title).trim();
-      if (v.variant_name !== undefined) result.variant_name = v.variant_name;
-      if (v.sku !== undefined) result.sku = String(v.sku).trim();
-      if (v.stock !== undefined) result.stock = parseInt(String(v.stock), 10) || 0;
-      if (v.price !== undefined) result.price = parseFloat(String(v.price));
-      if (v.position !== undefined) result.position = parseInt(String(v.position), 10);
-      return result;
-    });
   }
 
   private buildFilterQuery(
     req: Request,
   ): { query: string; search?: string; categories?: string[]; appliedFilters: any } {
-    const { 
-      search, 
-      category, 
-      stoneType, 
-      color, 
-      shape, 
-      carat, 
-      origin, 
-      treatment, 
-      availability, 
-      certificate, 
-      measurement, 
-      details, 
-      vendor, 
-      tags, 
+    const {
+      search,
+      category,
+      stoneType,
+      color,
+      shape,
+      carat,
+      origin,
+      treatment,
+      availability,
+      certificate,
+      measurement,
+      details,
+      vendor,
+      tags,
       is_featured,
       price_min,
       price_max,
       rating_min,
       rating_max,
-      metal
     } = req.query;
     const appliedFilters: any = {};
     let filterQuery = '';
@@ -195,7 +84,6 @@ export class ProductController {
       }
     }
 
-    // Handle new filter fields
     if (stoneType && typeof stoneType === 'string') {
       const stoneTypes = stoneType.split(',').map((c) => c.trim()).filter(Boolean);
       if (stoneTypes.length > 0) {
@@ -296,7 +184,6 @@ export class ProductController {
       filterQuery += `is_featured=${isFeaturedValue}&`;
     }
 
-    // Handle price range filters
     if (price_min && typeof price_min === 'string') {
       const priceMinValue = parseFloat(price_min);
       if (!isNaN(priceMinValue)) {
@@ -313,7 +200,6 @@ export class ProductController {
       }
     }
 
-    // Handle rating range filters
     if (rating_min && typeof rating_min === 'string') {
       const ratingMinValue = parseFloat(rating_min);
       if (!isNaN(ratingMinValue)) {
@@ -330,15 +216,6 @@ export class ProductController {
       }
     }
 
-    // Handle metal filter (filter by variant_name)
-    if (metal && typeof metal === 'string') {
-      const metals = metal.split(',').map((m) => m.trim()).filter(Boolean);
-      if (metals.length > 0) {
-        appliedFilters.metal = metals;
-        filterQuery += `metal=${metals.join(',')}&`;
-      }
-    }
-
     return {
       query: filterQuery.slice(0, -1),
       search: searchQuery,
@@ -347,52 +224,18 @@ export class ProductController {
     };
   }
 
-  private async getProductsWithFilters(
-    filters: any,
-    page: number,
-    limit: number,
-  ): Promise<{ products: any[]; total: number }> {
-    return this.productService.getProducts(page, limit, filters);
-  }
-
   // ── Public routes ──────────────────────────────────────────────────────────
 
   async getProducts(req: Request, res: Response): Promise<void> {
     try {
       const { page, limit } = parsePaginationParams(req.query as any, 12, 100);
       const filters = this.buildFilterQuery(req);
-      const result = await this.getProductsWithFilters(filters.appliedFilters, page, limit);
+      const result = await this.productService.getProducts(page, limit, filters.appliedFilters);
 
       logger.success('anonymous', 'getProducts', `Retrieved ${result.products.length} products`);
 
       const data: ProductListItemDto[] = result.products.map((p) => {
         const doc = p.toObject();
-        const variants = (doc.variants ?? []).map((v: any) => {
-          // Get previewImage from second image in array (index 1) if available, otherwise use thumbnail
-          const previewImage = v.images && v.images.length > 1 
-            ? v.images[1]?.src || v.thumbnail
-            : v.thumbnail || '';
-          
-          return {
-            id: v._id?.toString(),
-            title: v.title,
-            price: v.price,
-            available: v.stock > 0,
-            position: v.position,
-            thumbnail: v.thumbnail ?? '',
-            previewImage,
-          };
-        });
-        const prices = variants.map((v: any) => v.price).filter((n: number) => !isNaN(n));
-        
-        // Calculate options dynamically from variants
-        const variantTitles = doc.variants?.map((v: any) => v.title) as string[] || [];
-        const uniqueVariantNames = Array.from(new Set(variantTitles));
-        const options: ProductOptionDto[] = uniqueVariantNames.length > 0 ? [{
-          name: "Color",
-          values: uniqueVariantNames
-        }] : [];
-        
         return {
           id: doc._id?.toString(),
           slug: doc.slug ?? '',
@@ -402,9 +245,11 @@ export class ProductController {
           reviews_count: doc.reviews_count,
           tags: doc.tags ?? [],
           availability: doc.availability,
-          variants,
-          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-          options,
+          available: doc.stock > 0,
+          sku: doc.sku ?? '',
+          price: doc.price ?? 0,
+          stock: doc.stock ?? 0,
+          thumbnail: doc.thumbnail ?? '',
         };
       });
 
@@ -434,15 +279,6 @@ export class ProductController {
       logger.success('anonymous', 'getProductById', `Retrieved product: ${product.title}`);
 
       const productData = product.toObject();
-
-      // Calculate options dynamically from variants
-      const variantTitles = productData.variants?.map((v: any) => v.title) as string[] || [];
-      const uniqueVariantNames = Array.from(new Set(variantTitles));
-      const options: ProductOptionDto[] = uniqueVariantNames.length > 0 ? [{
-        name: "Color",
-        values: uniqueVariantNames
-      }] : [];
-
       const productDto = plainToInstance(ProductResponseDto, productData, { excludeExtraneousValues: true });
 
       // Fetch recommended products from the same category
@@ -454,17 +290,6 @@ export class ProductController {
 
       const recommendedProducts: ProductListItemDto[] = rawRecommended.map((p) => {
         const doc = p.toObject();
-        const variants = (doc.variants ?? []).map((v: any) => ({
-          id: v._id?.toString(),
-          title: v.title,
-          price: v.price,
-          available: v.stock > 0,
-          position: v.position,
-          thumbnail: v.thumbnail ?? '',
-        }));
-        const prices = variants.map((v: any) => v.price).filter((n: number) => !isNaN(n));
-        const uniqueTitles = Array.from(new Set(doc.variants?.map((v: any) => v.title) as string[]));
-        const recOptions: ProductOptionDto[] = uniqueTitles.length > 0 ? [{ name: 'Color', values: uniqueTitles }] : [];
         return {
           id: doc._id?.toString(),
           slug: doc.slug ?? '',
@@ -474,9 +299,11 @@ export class ProductController {
           reviews_count: doc.reviews_count,
           tags: doc.tags ?? [],
           availability: doc.availability,
-          variants,
-          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-          options: recOptions,
+          available: doc.stock > 0,
+          sku: doc.sku ?? '',
+          price: doc.price ?? 0,
+          stock: doc.stock ?? 0,
+          thumbnail: doc.thumbnail ?? '',
         };
       });
 
@@ -484,7 +311,7 @@ export class ProductController {
         success: true,
         code: 'PRODUCT_RETRIEVED',
         message: 'Product retrieved successfully',
-        data: { ...productDto, options },
+        data: productDto,
         recommendedProducts,
       });
     } catch (error: any) {
@@ -508,11 +335,6 @@ export class ProductController {
       logger.success('anonymous', 'getProductBySlug', `Retrieved product: ${product.title}`);
 
       const productData = product.toObject();
-
-      const variantTitles = productData.variants?.map((v: any) => v.title) as string[] || [];
-      const uniqueVariantNames = Array.from(new Set(variantTitles));
-      const options: ProductOptionDto[] = uniqueVariantNames.length > 0 ? [{ name: 'Color', values: uniqueVariantNames }] : [];
-
       const productDto = plainToInstance(ProductResponseDto, productData, { excludeExtraneousValues: true });
 
       const rawRecommended = await this.productService.getRecommendedProducts(
@@ -523,17 +345,6 @@ export class ProductController {
 
       const recommendedProducts: ProductListItemDto[] = rawRecommended.map((p) => {
         const doc = p.toObject();
-        const variants = (doc.variants ?? []).map((v: any) => ({
-          id: v._id?.toString(),
-          title: v.title,
-          price: v.price,
-          available: v.stock > 0,
-          position: v.position,
-          thumbnail: v.thumbnail ?? '',
-        }));
-        const prices = variants.map((v: any) => v.price).filter((n: number) => !isNaN(n));
-        const uniqueTitles = Array.from(new Set(doc.variants?.map((v: any) => v.title) as string[]));
-        const recOptions: ProductOptionDto[] = uniqueTitles.length > 0 ? [{ name: 'Color', values: uniqueTitles }] : [];
         return {
           id: doc._id?.toString(),
           slug: doc.slug ?? '',
@@ -543,9 +354,11 @@ export class ProductController {
           reviews_count: doc.reviews_count,
           tags: doc.tags ?? [],
           availability: doc.availability,
-          variants,
-          minPrice: prices.length > 0 ? Math.min(...prices) : 0,
-          options: recOptions,
+          available: doc.stock > 0,
+          sku: doc.sku ?? '',
+          price: doc.price ?? 0,
+          stock: doc.stock ?? 0,
+          thumbnail: doc.thumbnail ?? '',
         };
       });
 
@@ -553,7 +366,7 @@ export class ProductController {
         success: true,
         code: 'PRODUCT_RETRIEVED',
         message: 'Product retrieved successfully',
-        data: { ...productDto, options },
+        data: productDto,
         recommendedProducts,
       });
     } catch (error: any) {
@@ -621,50 +434,20 @@ export class ProductController {
   /**
    * POST /products  (multipart/form-data)
    *
-   * Product-level fields:
+   * Fields:
    *   title, description, vendor, category, stoneType, color, shape, carat,
    *   origin, treatment, certificate, measurement, details, diamondPcs,
-   *   availability, is_featured,
+   *   availability, is_featured, sku, price, stock,
    *   tags (comma-separated string or repeated field),
    *   videoUrls / certificateUrls (same),
-   *   imageMapping (JSON string, e.g. "[[0,1,2],[3,4,5]]")
+   *   imageMapping (JSON array string, e.g. "[0,1,2]" — optional file indices)
    *
-   * Variant fields (bracket notation):
-   *   variants[0][title], variants[0][variant_name], variants[0][sku],
-   *   variants[0][stock], variants[0][price], variants[0][position]
-   *   variants[1][...], ...
-   *
-   * Image files:
-   *   All uploaded under the "images" field; imageMapping maps file indices
-   *   to variant indices.
+   * Image files: uploaded under the "images" field
    */
   async createProduct(req: Request, res: Response): Promise<void> {
     try {
-      // 1. Parse variants from bracket-notation keys
-      const rawVariants = this.parseVariantFields(req.body);
-
-      if (rawVariants.length === 0) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'MISSING_VARIANTS', message: 'At least one variant is required' },
-        });
-        return;
-      }
-
-      // 2. Validate + coerce variants
-      let variants: CreateProductInput['variants'];
-      try {
-        variants = this.coerceVariants(rawVariants);
-      } catch (err: any) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: err.message, field: err.field },
-        });
-        return;
-      }
-
-      // 3. Parse imageMapping
-      let imageMapping: number[][];
+      // Parse imageMapping
+      let imageMapping: number[];
       try {
         imageMapping = this.parseImageMapping(req.body.imageMapping);
       } catch (err: any) {
@@ -675,7 +458,6 @@ export class ProductController {
         return;
       }
 
-      // 4. Assemble product data
       const productData: CreateProductInput = {
         title: req.body.title?.trim(),
         description: req.body.description?.trim(),
@@ -690,13 +472,15 @@ export class ProductController {
         certificate: req.body.certificate?.trim(),
         measurement: req.body.measurement?.trim(),
         details: req.body.details?.trim(),
+        sku: req.body.sku?.trim(),
+        price: parseFloat(req.body.price),
+        stock: parseInt(req.body.stock, 10) || 0,
         diamondPcs: parseInt(req.body.diamondPcs, 10) || 0,
         availability: req.body.availability !== 'false',
         is_featured: req.body.is_featured === 'true',
         tags: this.parseStringArray(req.body.tags),
         videoUrls: this.parseStringArray(req.body.videoUrls),
         certificateUrls: this.parseStringArray(req.body.certificateUrls),
-        variants,
         imageMapping,
       };
 
@@ -767,23 +551,7 @@ export class ProductController {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-      // Parse variants if provided
-      const rawVariants = this.parseVariantFields(req.body);
-
-      let variants: UpdateProductInput['variants'];
-      if (rawVariants.length > 0) {
-        try {
-          variants = this.coerceVariantsForUpdate(rawVariants);
-        } catch (err: any) {
-          res.status(400).json({
-            success: false,
-            error: { code: 'INVALID_INPUT', message: err.message, field: err.field },
-          });
-          return;
-        }
-      }
-
-      let imageMapping: number[][] | undefined;
+      let imageMapping: number[] | undefined;
       try {
         imageMapping = req.body.imageMapping ? this.parseImageMapping(req.body.imageMapping) : undefined;
       } catch (err: any) {
@@ -794,7 +562,7 @@ export class ProductController {
         return;
       }
 
-      let delImgMapping: number[][] | undefined;
+      let delImgMapping: number[] | undefined;
       try {
         delImgMapping = req.body.delImgMapping ? this.parseImageMapping(req.body.delImgMapping) : undefined;
       } catch (err: any) {
@@ -807,7 +575,6 @@ export class ProductController {
 
       const updateData: UpdateProductInput = {};
 
-      // Only include fields that were actually sent
       if (req.body.title !== undefined) updateData.title = req.body.title?.trim();
       if (req.body.description !== undefined) updateData.description = req.body.description?.trim();
       if (req.body.vendor !== undefined) updateData.vendor = req.body.vendor?.trim();
@@ -821,6 +588,9 @@ export class ProductController {
       if (req.body.certificate !== undefined) updateData.certificate = req.body.certificate?.trim();
       if (req.body.measurement !== undefined) updateData.measurement = req.body.measurement?.trim();
       if (req.body.details !== undefined) updateData.details = req.body.details?.trim();
+      if (req.body.sku !== undefined) updateData.sku = req.body.sku?.trim();
+      if (req.body.price !== undefined) updateData.price = parseFloat(req.body.price);
+      if (req.body.stock !== undefined) updateData.stock = parseInt(req.body.stock, 10);
       if (req.body.diamondPcs !== undefined) updateData.diamondPcs = parseInt(req.body.diamondPcs, 10);
       if (req.body.availability !== undefined) updateData.availability = req.body.availability !== 'false';
       if (req.body.is_featured !== undefined) updateData.is_featured = req.body.is_featured === 'true';
@@ -828,7 +598,6 @@ export class ProductController {
       if (req.body.videoUrls !== undefined) updateData.videoUrls = this.parseStringArray(req.body.videoUrls);
       if (req.body.certificateUrls !== undefined)
         updateData.certificateUrls = this.parseStringArray(req.body.certificateUrls);
-      if (variants) updateData.variants = variants;
       if (imageMapping) updateData.imageMapping = imageMapping;
       if (delImgMapping) updateData.delImgMapping = delImgMapping;
 
@@ -914,28 +683,15 @@ export class ProductController {
         if (raw.certificate !== undefined) updateData.certificate = raw.certificate.trim();
         if (raw.measurement !== undefined) updateData.measurement = raw.measurement.trim();
         if (raw.details !== undefined) updateData.details = raw.details.trim();
+        if (raw.sku !== undefined) updateData.sku = raw.sku.trim();
+        if (raw.price !== undefined) updateData.price = raw.price;
+        if (raw.stock !== undefined) updateData.stock = raw.stock;
         if (raw.diamondPcs !== undefined) updateData.diamondPcs = raw.diamondPcs;
         if (raw.availability !== undefined) updateData.availability = raw.availability;
         if (raw.is_featured !== undefined) updateData.is_featured = raw.is_featured;
         if (raw.tags !== undefined) updateData.tags = raw.tags;
         if (raw.videoUrls !== undefined) updateData.videoUrls = raw.videoUrls;
         if (raw.certificateUrls !== undefined) updateData.certificateUrls = raw.certificateUrls;
-
-        if (Array.isArray(raw.variants) && raw.variants.length > 0) {
-          try {
-            updateData.variants = this.coerceVariantsForUpdate(raw.variants);
-          } catch (err: any) {
-            res.status(400).json({
-              success: false,
-              error: {
-                code: 'INVALID_INPUT',
-                message: `productId "${productId}": ${err.message}`,
-                field: err.field,
-              },
-            });
-            return;
-          }
-        }
 
         typedUpdates.push({ productId, updateData });
       }

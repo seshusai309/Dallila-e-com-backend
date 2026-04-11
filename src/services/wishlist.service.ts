@@ -1,7 +1,7 @@
 import { WishlistRepository } from '../repository/WishlistRepository';
 import { ProductRepository } from '../repository/ProductRepository';
 import { Wishlist } from '../models/Wishlist';
-import { WishlistNotFoundError, ProductNotFoundError, InsufficientVariantImagesError } from '../utils/errors/wishlist.errors';
+import { WishlistNotFoundError, ProductNotFoundError } from '../utils/errors/wishlist.errors';
 
 export interface WishlistItemInput {
   productId: string;
@@ -87,12 +87,6 @@ export class WishlistService {
       throw new ProductNotFoundError();
     }
 
-    // Ensure the first variant has at least 2 images
-    const firstVariant = product.variants[0];
-    if (!firstVariant || firstVariant.images.length < 2) {
-      throw new InsufficientVariantImagesError();
-    }
-
     // Get or create wishlist
     const wishlist = await this.getOrCreateWishlist(userId);
 
@@ -100,8 +94,8 @@ export class WishlistService {
     const wishlistItem: WishlistItemInput = {
       productId: product._id.toString(),
       title: product.title,
-      price: product.variants[0]?.price ?? 0,
-      thumbnail: product.variants[0]?.thumbnail || product.variants[0]?.images?.[0]?.src || '',
+      price: product.price ?? 0,
+      thumbnail: product.thumbnail || product.images?.[0]?.src || '',
       addedAt: new Date(),
     };
 

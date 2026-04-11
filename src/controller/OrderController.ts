@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 import { plainToInstance } from 'class-transformer';
 import { OrderResponseDto, OrderStatsDto, PaymentHistoryDto } from '../dtos/order.dto';
 import { createPaginatedResponse, parsePaginationParams } from '../utils/pagination';
-import { OrderNotFoundError, AddressNotFoundError, AddressNotBelongToUserError, OrderCannotBeCancelledError, InvalidOrderStatusError, OrderAlreadyPaidError, PaymentInProgressError, InsufficientStockError, InsufficientVariantImagesError } from '../utils/errors/order.errors';
+import { OrderNotFoundError, AddressNotFoundError, AddressNotBelongToUserError, OrderCannotBeCancelledError, InvalidOrderStatusError, OrderAlreadyPaidError, PaymentInProgressError, InsufficientStockError } from '../utils/errors/order.errors';
 import { CartNotFoundError } from '../utils/errors/cart.errors';
 
 export class OrderController {
@@ -91,15 +91,7 @@ export class OrderController {
         return;
       }
 
-      if (error instanceof InsufficientVariantImagesError) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'INSUFFICIENT_VARIANT_IMAGES', message: error.message }
-        });
-        return;
-      }
-
-      // No shipping address, product/variant not found, or other known domain errors
+      // No shipping address, product not found, or other known domain errors
       const knownMessages = [
         'No shipping address available',
         'not found',

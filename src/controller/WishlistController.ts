@@ -3,7 +3,7 @@ import { WishlistService } from '../services/wishlist.service';
 import { logger } from '../utils/logger';
 import { plainToInstance } from 'class-transformer';
 import { WishlistResponseDto, WishlistStatsDto, UserDetailsDto } from '../dtos/wishlist.dto';
-import { WishlistNotFoundError, ProductNotFoundError, InsufficientVariantImagesError } from '../utils/errors/wishlist.errors';
+import { WishlistNotFoundError, ProductNotFoundError } from '../utils/errors/wishlist.errors';
 import { createPaginatedResponse, parsePaginationParams } from '../utils/pagination';
 
 export class WishlistController {
@@ -76,13 +76,6 @@ export class WishlistController {
         res.status(404).json({
           success: false,
           error: { code: 'PRODUCT_NOT_FOUND', message: 'Product not found' }
-        });
-        return;
-      }
-      if (error instanceof InsufficientVariantImagesError) {
-        res.status(400).json({
-          success: false,
-          error: { code: 'INSUFFICIENT_VARIANT_IMAGES', message: error.message }
         });
         return;
       }

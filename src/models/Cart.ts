@@ -2,8 +2,6 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface CartItem {
   productId: string; // MongoDB _id
-  variantId: string; // Variant _id
-  variant_name: 'gold' | 'silver' | 'rose gold';
   sku: string;
   title: string;
   price: number;
@@ -24,8 +22,6 @@ export interface Cart extends Document {
 
 const cartItemSchema = new Schema({
   productId: { type: String, required: true }, // MongoDB _id
-  variantId: { type: String, required: true }, // Variant _id
-  variant_name: { type: String, required: true, enum: ['gold', 'silver', 'rose gold'] },
   sku: { type: String, required: true },
   title: { type: String, required: true },
   price: { type: Number, required: true },

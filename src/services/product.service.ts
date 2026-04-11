@@ -8,15 +8,6 @@ import { logger } from '../utils/logger';
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
-export interface CreateVariantInput {
-  title: string;
-  variant_name: 'gold' | 'silver' | 'rose gold';
-  sku: string;
-  stock?: number;
-  price: number;
-  position?: number;
-}
-
 export interface CreateProductInput {
   title: string;
   description: string;
@@ -31,25 +22,17 @@ export interface CreateProductInput {
   certificate: string;
   measurement: string;
   details: string;
+  sku: string;
+  price: number;
+  stock?: number;
   diamondPcs?: number;
   availability?: boolean;
   is_featured?: boolean;
   tags?: string[];
   videoUrls?: string[];
   certificateUrls?: string[];
-  variants: CreateVariantInput[];
-  // imageMapping[i] = array of uploaded-file indices that belong to variant i
-  imageMapping?: number[][];
-}
-
-export interface UpdateVariantInput {
-  _id?: string;
-  title?: string;
-  variant_name?: 'gold' | 'silver' | 'rose gold';
-  sku?: string;
-  stock?: number;
-  price?: number;
-  position?: number;
+  // imageMapping is a flat array of file indices to include as product images
+  imageMapping?: number[];
 }
 
 export interface UpdateProductInput {
@@ -66,15 +49,17 @@ export interface UpdateProductInput {
   certificate?: string;
   measurement?: string;
   details?: string;
+  sku?: string;
+  price?: number;
+  stock?: number;
   diamondPcs?: number;
   availability?: boolean;
   is_featured?: boolean;
   tags?: string[];
   videoUrls?: string[];
   certificateUrls?: string[];
-  variants?: UpdateVariantInput[];
-  imageMapping?: number[][];
-  delImgMapping?: number[][];
+  imageMapping?: number[];
+  delImgMapping?: number[];
 }
 
 export interface BulkUpdateResult {
@@ -129,22 +114,15 @@ export class ProductService {
   // ── Image upload helper ────────────────────────────────────────────────────
 
   /**
-   * Upload all files to S3, then distribute them to variants according to
-   * imageMapping.  Returns an array of variant image arrays ready for saving.
-   *
-   * imageMapping[i] = [fileIndex, fileIndex, ...]  → variant i gets those files
-   *
-   * Fallback when imageMapping is empty or shorter than variantCount:
-   *   images are assigned sequentially — one file per variant in order.
-   *   e.g. 3 files + 3 variants → variant 0 gets file 0, variant 1 gets file 1, etc.
+   * Upload all files to S3 and return image array for the product.
+   * If imageMapping is provided, only use those file indices (in order).
+   * Otherwise use all uploaded files.
    */
-  private async buildVariantImages(
+  private async buildProductImages(
     productId: string,
     files: Express.Multer.File[],
-    imageMapping: number[][],
-    variantCount: number,
-  ): Promise<Array<Array<{ _id: string; src: string; position: number }>>> {
-    // Upload every file once
+    imageMapping: number[],
+  ): Promise<Array<{ _id: string; src: string; position: number }>> {
     const fileData = files.map((f) => ({
       buffer: f.buffer,
       originalName: f.originalname,
@@ -153,49 +131,24 @@ export class ProductService {
 
     const uploaded = await this.s3Service.uploadProductImages(productId, fileData);
 
-    // If no imageMapping provided, fall back to sequential 1-per-variant assignment
-    const effectiveMapping: number[][] =
-      imageMapping.length === 0
-        ? Array.from({ length: variantCount }, (_, i) => (i < uploaded.length ? [i] : []))
-        : imageMapping;
+    const effectiveIndices: number[] =
+      imageMapping.length > 0 ? imageMapping : Array.from({ length: uploaded.length }, (_, i) => i);
 
-    // ── Validate imageMapping against uploaded files ───────────────────────
+    // Validate indices
     if (imageMapping.length > 0) {
-      const allIndices = effectiveMapping.flat();
-
-      // 1. Every referenced index must be within bounds
-      const outOfBounds = allIndices.filter((idx) => idx < 0 || idx >= uploaded.length);
+      const outOfBounds = effectiveIndices.filter((idx) => idx < 0 || idx >= uploaded.length);
       if (outOfBounds.length > 0) {
         throw new ImageMappingError(
-          `imageMapping references file index [${[...new Set(outOfBounds)].join(', ')}] but only ${uploaded.length} file(s) were uploaded (valid indices: 0–${uploaded.length - 1})`,
-        );
-      }
-
-      // 2. Every uploaded file must be referenced — no orphaned uploads
-      const referencedCount = new Set(allIndices).size;
-      if (referencedCount !== uploaded.length) {
-        throw new ImageMappingError(
-          `imageMapping references ${referencedCount} unique file(s) but ${uploaded.length} file(s) were uploaded — every uploaded image must be assigned to a variant`,
+          `imageMapping references file index [${[...new Set(outOfBounds)].join(', ')}] but only ${uploaded.length} file(s) were uploaded`,
         );
       }
     }
 
-    // Build per-variant image arrays
-    const result: Array<Array<{ _id: string; src: string; position: number }>> = Array.from(
-      { length: variantCount },
-      () => [],
-    );
-
-    for (let vi = 0; vi < variantCount; vi++) {
-      const indices = effectiveMapping[vi] ?? [];
-      result[vi] = indices.map((idx, position) => ({
-        _id: new mongoose.Types.ObjectId().toString(),
-        src: uploaded[idx].url,
-        position: position + 1,
-      }));
-    }
-
-    return result;
+    return effectiveIndices.map((idx, position) => ({
+      _id: new mongoose.Types.ObjectId().toString(),
+      src: uploaded[idx].url,
+      position: position + 1,
+    }));
   }
 
   // ── Public CRUD ────────────────────────────────────────────────────────────
@@ -274,9 +227,8 @@ export class ProductService {
   /**
    * Create a product.
    *
-   * - files:        all uploaded images (from multer)
-   * - imageMapping: productData.imageMapping[i] = file indices for variant i
-   *                 e.g. [[0,1,2],[3,4,5],[6,7]]
+   * - files:        uploaded images (from multer)
+   * - imageMapping: optional array of file indices to use (all used if omitted)
    */
   async createProduct(productData: CreateProductInput, files?: Express.Multer.File[]): Promise<Product> {
     // Normalize category
@@ -291,81 +243,17 @@ export class ProductService {
     const tempProductId = `temp_${Date.now()}`;
     const imageMapping = productData.imageMapping ?? [];
 
-    // imageMapping without uploaded files is meaningless — reject early
     if (imageMapping.length > 0 && (!files || files.length === 0)) {
       throw new ImageMappingError(
-        'imageMapping was provided but no image files were uploaded. ' +
-        'Either upload image files along with imageMapping, or remove imageMapping from the request.',
+        'imageMapping was provided but no image files were uploaded.',
       );
     }
 
-    // Validate imageMapping dimensions
-    if (imageMapping.length > 0 && imageMapping.length !== productData.variants.length) {
-      throw new ImageMappingError(
-        `imageMapping has ${imageMapping.length} entries but there are ${productData.variants.length} variants`,
-      );
-    }
-
-    // Validate that all variants have images assigned in imageMapping
-    if (imageMapping.length > 0) {
-      const emptyVariants = imageMapping
-        .map((mapping, index) => ({ index, hasImages: mapping.length > 0 }))
-        .filter((variant) => !variant.hasImages);
-      
-      if (emptyVariants.length > 0) {
-        throw new ImageMappingError(
-          `All variants must have images assigned. Variant(s) at index [${emptyVariants.map((v) => v.index).join(', ')}] have no images. ` +
-          'Please ensure every variant in imageMapping has at least one image assigned.',
-        );
-      }
-    }
-
-    // Validate that at least one variant will have an image
-    if (!files || files.length === 0) {
-      throw new ImageMappingError(
-        'At least one image is required for product variants. ' +
-        'Please upload at least one image file when creating a product.'
-      );
-    }
-
-    // Build variant image arrays (uploads to S3 internally)
-    let variantImageGroups: Array<Array<{ _id: string; src: string; position: number }>> = productData.variants.map(
-      () => [],
-    );
+    let images: Array<{ _id: string; src: string; position: number }> = [];
 
     if (files && files.length > 0) {
-      variantImageGroups = await this.buildVariantImages(
-        tempProductId,
-        files,
-        imageMapping,
-        productData.variants.length,
-      );
+      images = await this.buildProductImages(tempProductId, files, imageMapping);
     }
-
-    // Validate that at least one variant has images after processing
-    const hasVariantWithImages = variantImageGroups.some(images => images.length > 0);
-    if (!hasVariantWithImages) {
-      throw new ImageMappingError(
-        'At least one variant must have an image. ' +
-        'Please ensure imageMapping properly assigns uploaded images to variants.'
-      );
-    }
-
-    // Assemble full variant documents
-    const variants = productData.variants.map((v, i) => {
-      const images = variantImageGroups[i] ?? [];
-      return {
-        _id: new mongoose.Types.ObjectId().toString(),
-        title: v.title,
-        variant_name: v.variant_name,
-        sku: v.sku,
-        stock: v.stock ?? 0,
-        price: v.price,
-        position: v.position ?? i + 1,
-        thumbnail: images[0]?.src ?? '',
-        images,
-      };
-    });
 
     const createData: Partial<Product> = {
       title: productData.title,
@@ -381,111 +269,24 @@ export class ProductService {
       certificate: productData.certificate,
       measurement: productData.measurement,
       details: productData.details,
+      sku: productData.sku,
+      price: productData.price,
+      stock: productData.stock ?? 0,
+      thumbnail: images[0]?.src,
+      images,
       diamondPcs: productData.diamondPcs ?? 0,
       availability: productData.availability ?? true,
       is_featured: productData.is_featured ?? false,
       tags: productData.tags ?? [],
       videoUrls: productData.videoUrls ?? [],
       certificateUrls: productData.certificateUrls ?? [],
-      variants,
     };
 
     return this.productRepository.create(createData);
   }
 
   /**
-   * For UPDATE only: imageMapping[variantIdx] = target position indices within that
-   * variant's existing images array.
-   *
-   *   []    → preserve all existing images for this variant (no change)
-   *   [0]   → replace image at position 0 with the new uploaded file
-   *   [1]   → add a new image at position 1 (only valid if variant already has 1 image)
-   *   [p]   → error if p > existing image count for that variant
-   *
-   * Files are consumed in order across all non-empty mapping entries.
-   */
-  private async buildVariantImagesForUpdate(
-    productId: string,
-    files: Express.Multer.File[],
-    imageMapping: number[][],
-    existingVariants: Array<{ images: Array<{ _id: string; src: string; position: number }>; thumbnail?: string }>,
-  ): Promise<Array<Array<{ _id: string; src: string; position: number }>>> {
-    // Count total files needed from position entries
-    const totalFilesNeeded = imageMapping.reduce((sum, positions) => sum + positions.length, 0);
-    if (totalFilesNeeded !== files.length) {
-      throw new ImageMappingError(
-        `imageMapping requires ${totalFilesNeeded} file(s) based on position entries, ` +
-        `but ${files.length} file(s) were uploaded.`,
-      );
-    }
-
-    // Validate all positions before uploading anything
-    for (let vi = 0; vi < imageMapping.length; vi++) {
-      const positions = imageMapping[vi];
-      if (positions.length === 0) continue;
-      const existingCount = existingVariants[vi]?.images?.length ?? 0;
-      for (const p of positions) {
-        if (p > existingCount) {
-          throw new ImageMappingError(
-            `Variant ${vi} has ${existingCount} image(s). ` +
-            `To add a new image use index ${existingCount}, not ${p}.`,
-          );
-        }
-      }
-    }
-
-    // Upload all files once
-    const uploaded = await this.s3Service.uploadProductImages(
-      productId,
-      files.map((f) => ({ buffer: f.buffer, originalName: f.originalname, mimeType: f.mimetype })),
-    );
-
-    // Apply positions to each variant's image array
-    let fileIdx = 0;
-    const result: Array<Array<{ _id: string; src: string; position: number }>> = [];
-
-    for (let vi = 0; vi < imageMapping.length; vi++) {
-      const positions = imageMapping[vi];
-      const existingImages = (existingVariants[vi]?.images ?? []).map((img) => ({
-        _id: img._id,
-        src: img.src,
-        position: img.position,
-      }));
-
-      if (positions.length === 0) {
-        result[vi] = existingImages; // preserve unchanged
-        continue;
-      }
-
-      const updatedImages = [...existingImages];
-      for (const p of positions) {
-        const newImage = {
-          _id: new mongoose.Types.ObjectId().toString(),
-          src: uploaded[fileIdx].url,
-          position: p,
-        };
-        fileIdx++;
-        const existingAtPos = updatedImages.findIndex((img) => img.position === p);
-        if (existingAtPos >= 0) {
-          updatedImages[existingAtPos] = newImage; // replace
-        } else {
-          updatedImages.push(newImage); // add
-        }
-      }
-
-      updatedImages.sort((a, b) => a.position - b.position);
-      updatedImages.forEach((img, i) => { img.position = i + 1; });
-      result[vi] = updatedImages;
-    }
-
-    return result;
-  }
-
-  /**
    * Update a product.
-   *
-   * Variant patches (variants[N]) and image updates (imageMapping + files) are
-   * independent operations — both merge into the existing variants array.
    */
   async updateProduct(
     productId: string,
@@ -503,25 +304,14 @@ export class ProductService {
     const delImgMapping = updateData.delImgMapping ?? [];
     const imageMapping = updateData.imageMapping ?? [];
 
-    // delImgMapping must align with variant count — validated later after fetching product
-    // imageMapping without files
     if (imageMapping.length > 0 && (!files || files.length === 0)) {
       throw new ImageMappingError(
-        'imageMapping was provided but no image files were uploaded. ' +
-        'Upload image files along with imageMapping, or remove imageMapping from the request.',
+        'imageMapping was provided but no image files were uploaded.',
       );
     }
 
-    // Files without imageMapping
-    if (files && files.length > 0 && imageMapping.length === 0) {
-      throw new ImageMappingError(
-        'Image files were uploaded but imageMapping was not provided. ' +
-        'Include imageMapping to specify where each image should be placed in each variant.',
-      );
-    }
-
-    // Fetch existing product once if we need to touch variants or images
-    const needsExisting = (updateData.variants && updateData.variants.length > 0) || (files && files.length > 0) || delImgMapping.length > 0;
+    // Fetch existing product if we need to handle images
+    const needsExisting = (files && files.length > 0) || delImgMapping.length > 0;
     let existingProduct: Product | null = null;
 
     if (needsExisting) {
@@ -529,152 +319,59 @@ export class ProductService {
       if (!existingProduct) throw new ProductNotFoundError(`Product with ID ${productId} not found`);
     }
 
-    // Build a mutable plain-object copy of ALL existing variants
-    const merged: any[] = existingProduct
-      ? existingProduct.variants.map((ev) => ((ev as any).toObject ? (ev as any).toObject() : { ...ev }))
-      : [];
+    let currentImages: Array<{ _id: string; src: string; position: number }> =
+      existingProduct ? (existingProduct.images as any[]).map((img: any) =>
+        img.toObject ? img.toObject() : { ...img }
+      ) : [];
 
-    // ── 0. Apply image deletions (delImgMapping) ────────────────────────────
+    // ── Apply image deletions ──────────────────────────────────────────────
     if (delImgMapping.length > 0) {
-      if (delImgMapping.length !== merged.length) {
-        throw new ImageMappingError(
-          `delImgMapping has ${delImgMapping.length} entr${delImgMapping.length !== 1 ? 'ies' : 'y'} ` +
-          `but the product has ${merged.length} variant${merged.length !== 1 ? 's' : ''}. ` +
-          `Provide one entry per variant (use [] to skip a variant).`,
-        );
-      }
-
-      for (let vi = 0; vi < delImgMapping.length; vi++) {
-        const indices = delImgMapping[vi];
-        if (indices.length === 0) continue;
-
-        const images: Array<{ _id: string; src: string; position: number }> = merged[vi].images ?? [];
-
-        // Validate indices
-        for (const idx of indices) {
-          if (idx < 0 || idx >= images.length) {
-            throw new ImageMappingError(
-              `delImgMapping[${vi}] references image index ${idx} but variant ${vi} only has ${images.length} image(s) (valid indices: 0–${images.length - 1}).`,
-            );
-          }
-        }
-
-        const uniqueIndices = [...new Set(indices)];
-        if (images.length - uniqueIndices.length < 1) {
+      for (const idx of delImgMapping) {
+        if (idx < 0 || idx >= currentImages.length) {
           throw new ImageMappingError(
-            `Cannot delete all images from variant ${vi}. A variant must keep at least one image.`,
+            `delImgMapping references image index ${idx} but product only has ${currentImages.length} image(s)`,
           );
         }
+      }
 
-        // Collect srcs to delete from S3
-        const toDelete = uniqueIndices.map((idx) => images[idx]);
+      if (currentImages.length - new Set(delImgMapping).size < 1) {
+        throw new ImageMappingError('Cannot delete all images from a product. At least one image must remain.');
+      }
 
-        // Remove from array (high-to-low to preserve indices)
-        uniqueIndices.sort((a, b) => b - a).forEach((idx) => images.splice(idx, 1));
+      const toDelete = [...new Set(delImgMapping)].map((idx) => currentImages[idx]);
 
-        // Re-number positions
-        images.forEach((img, i) => { img.position = i + 1; });
+      const sortedIndices = [...new Set(delImgMapping)].sort((a, b) => b - a);
+      sortedIndices.forEach((idx) => currentImages.splice(idx, 1));
+      currentImages.forEach((img, i) => { img.position = i + 1; });
 
-        // Fix thumbnail if it was one of the deleted images
-        const deletedSrcs = new Set(toDelete.map((img) => img.src));
-        if (deletedSrcs.has(merged[vi].thumbnail)) {
-          merged[vi].thumbnail = images[0]?.src ?? '';
-        }
-
-        merged[vi].images = images;
-
-        // Delete from S3 (non-fatal)
-        for (const img of toDelete) {
-          try {
-            const key = new URL(img.src).pathname.slice(1);
-            await this.s3Service.deleteFile(key);
-          } catch {
-            logger.error('ProductService', 'updateProduct', `S3 delete failed for image ${img._id}, continuing`);
-          }
+      // Delete from S3 (non-fatal)
+      for (const img of toDelete) {
+        try {
+          const key = new URL(img.src).pathname.slice(1);
+          await this.s3Service.deleteFile(key);
+        } catch {
+          logger.error('ProductService', 'updateProduct', `S3 delete failed for image ${img._id}, continuing`);
         }
       }
     }
 
-    // ── 1. Apply variant field patches ──────────────────────────────────────
-    if (updateData.variants && updateData.variants.length > 0) {
-      const patches = updateData.variants as any[];
-      const variantCount = merged.length;
-
-      // Validate patches reference existing variants (skip empty patch objects)
-      patches.forEach((patch, i) => {
-        const { _variantIndex, ...patchFields } = patch;
-        if (Object.keys(patchFields).length === 0) return; // empty patch — nothing to do
-        const patchIdx = typeof _variantIndex === 'number' ? _variantIndex : i;
-        if (patch._id) {
-          if (!merged.some((ev) => ev._id === patch._id)) {
-            throw new InvalidProductDataError(
-              `Variant with _id "${patch._id}" does not exist on this product. ` +
-              `Valid variant IDs: ${merged.map((ev) => ev._id).join(', ')}`,
-            );
-          }
-        } else if (patchIdx >= variantCount) {
-          const validIndices = Array.from({ length: variantCount }, (_, k) => k).join(', ');
-          throw new InvalidProductDataError(
-            `This product only has ${variantCount} variant${variantCount !== 1 ? 's' : ''} ` +
-            `(index${variantCount !== 1 ? 'es' : ''} ${validIndices}). ` +
-            `Cannot update variants[${patchIdx}].`,
-          );
-        }
-      });
-
-      // Merge each patch into the corresponding variant (skip empty patch objects)
-      patches.forEach((patch, i) => {
-        const { _variantIndex, ...cleanPatch } = patch;
-        if (Object.keys(cleanPatch).length === 0) return; // empty patch — nothing to do
-        const targetIdx = cleanPatch._id
-          ? merged.findIndex((ev) => ev._id === cleanPatch._id)
-          : (typeof _variantIndex === 'number' ? _variantIndex : i);
-
-        if (targetIdx >= 0 && targetIdx < merged.length) {
-          merged[targetIdx] = {
-            ...merged[targetIdx],
-            ...cleanPatch,
-            _id: merged[targetIdx]._id,
-            images: merged[targetIdx].images ?? [],
-            thumbnail: merged[targetIdx].thumbnail ?? '',
-          };
-        }
-      });
-    }
-
-    // ── 2. Apply image updates (position-based) ──────────────────────────────
+    // ── Apply new image uploads ────────────────────────────────────────────
     if (files && files.length > 0) {
-      if (imageMapping.length !== merged.length) {
-        throw new ImageMappingError(
-          `imageMapping has ${imageMapping.length} entr${imageMapping.length !== 1 ? 'ies' : 'y'} ` +
-          `but the product has ${merged.length} variant${merged.length !== 1 ? 's' : ''}. ` +
-          `Provide one imageMapping entry per variant (use [] to preserve a variant's images).`,
-        );
-      }
-
-      const updatedImageArrays = await this.buildVariantImagesForUpdate(
-        productId,
-        files,
-        imageMapping,
-        merged,
-      );
-
-      merged.forEach((v, i) => {
-        merged[i] = {
-          ...v,
-          images: updatedImageArrays[i],
-          thumbnail: updatedImageArrays[i][0]?.src ?? v.thumbnail ?? '',
-        };
-      });
+      const newImages = await this.buildProductImages(productId, files, imageMapping);
+      // Append new images after existing ones, re-number positions
+      const startPosition = currentImages.length + 1;
+      newImages.forEach((img, i) => { img.position = startPosition + i; });
+      currentImages = [...currentImages, ...newImages];
     }
 
-    // Persist merged variants if we built them
-    if (existingProduct) {
-      updateData.variants = merged;
-    }
+    // Build persist data
+    const { imageMapping: _im, delImgMapping: _dim, ...persistFields } = updateData as any;
+    const persistData: any = { ...persistFields };
 
-    // Strip imageMapping / delImgMapping before persisting (not model fields)
-    const { imageMapping: _removed, delImgMapping: _removedDel, ...persistData } = updateData as any;
+    if (needsExisting) {
+      persistData.images = currentImages;
+      persistData.thumbnail = currentImages[0]?.src ?? existingProduct?.thumbnail ?? '';
+    }
 
     const updatedProduct = await this.productRepository.updateById(productId, persistData);
     if (!updatedProduct) throw new ProductNotFoundError(`Product with ID ${productId} not found`);
@@ -686,9 +383,9 @@ export class ProductService {
       title: string; description: string; vendor: string; category: string;
       stoneType: string; color: string; shape: string; carat: number;
       origin: string; treatment: string; certificate: string; measurement: string;
-      details: string; diamondPcs?: number; availability?: boolean; is_featured?: boolean;
+      details: string; sku: string; price: number; stock?: number;
+      diamondPcs?: number; availability?: boolean; is_featured?: boolean;
       tags?: string[]; videoUrls?: string[]; certificateUrls?: string[];
-      variants: Array<{ title: string; variant_name: 'gold' | 'silver' | 'rose gold'; sku: string; stock?: number; price: number; position?: number }>;
     }>,
   ): Promise<{ created: number; failed: number; details: Array<{ index: number; title: string; error: string }> }> {
     let created = 0;
@@ -699,18 +396,6 @@ export class ProductService {
       const productData = products[i];
       try {
         const category = await this.normalizeOrFindCategory(productData.category);
-
-        const variants = productData.variants.map((v, vi) => ({
-          _id: new mongoose.Types.ObjectId().toString(),
-          title: v.title,
-          variant_name: v.variant_name,
-          sku: v.sku,
-          stock: v.stock ?? 0,
-          price: v.price,
-          position: v.position ?? vi + 1,
-          thumbnail: '',
-          images: [],
-        }));
 
         await this.productRepository.create({
           title: productData.title,
@@ -726,13 +411,16 @@ export class ProductService {
           certificate: productData.certificate,
           measurement: productData.measurement,
           details: productData.details,
+          sku: productData.sku,
+          price: productData.price,
+          stock: productData.stock ?? 0,
           diamondPcs: productData.diamondPcs ?? 0,
           availability: productData.availability ?? true,
           is_featured: productData.is_featured ?? false,
           tags: productData.tags ?? [],
           videoUrls: productData.videoUrls ?? [],
           certificateUrls: productData.certificateUrls ?? [],
-          variants,
+          images: [],
         } as any);
 
         created++;
@@ -800,7 +488,6 @@ export class ProductService {
     measurements: string[];
     vendors: string[];
     tags: string[];
-    metals: string[];
     priceRange: { min: number; max: number };
     ratingRange: { min: number; max: number };
     caratRange: { min: number; max: number };

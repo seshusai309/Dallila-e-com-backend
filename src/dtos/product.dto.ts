@@ -13,37 +13,6 @@ export class ProductImageDto {
   position!: number;
 }
 
-// ── Variant DTO ──────────────────────────────────────────────────────────────
-export class ProductVariantDto {
-  @Expose()
-  _id!: string;
-
-  @Expose()
-  title!: string;
-
-  @Expose()
-  variant_name!: 'gold' | 'silver' | 'rose gold';
-
-  @Expose()
-  sku!: string;
-
-  @Expose()
-  stock!: number;
-
-  @Expose()
-  price!: number;
-
-  @Expose()
-  position!: number;
-
-  @Expose()
-  thumbnail!: string;
-
-  @Expose()
-  @Type(() => ProductImageDto)
-  images!: ProductImageDto[];
-}
-
 // ── Options DTO ───────────────────────────────────────────────────────────────
 export interface ProductOptionDto {
   name: string;
@@ -119,24 +88,23 @@ export class ProductResponseDto extends BaseDto {
   diamondPcs!: number;
 
   @Expose()
-  @Type(() => ProductVariantDto)
-  variants!: ProductVariantDto[];
+  sku!: string;
 
   @Expose()
-  options?: ProductOptionDto[];
+  price!: number;
+
+  @Expose()
+  stock!: number;
+
+  @Expose()
+  thumbnail?: string;
+
+  @Expose()
+  @Type(() => ProductImageDto)
+  images!: ProductImageDto[];
 }
 
 // ── Product List DTOs (slim, for GET /products) ──────────────────────────────
-export interface ProductListVariantDto {
-  id: string;
-  title: string;
-  price: number;
-  available: boolean;
-  position: number;
-  thumbnail: string;
-  previewImage: string;
-}
-
 export interface ProductListItemDto {
   id: string;
   slug: string;
@@ -146,9 +114,11 @@ export interface ProductListItemDto {
   reviews_count: number;
   tags: string[];
   availability: boolean;
-  variants: ProductListVariantDto[];
-  minPrice: number;
-  options?: ProductOptionDto[];
+  available: boolean;
+  sku: string;
+  price: number;
+  stock: number;
+  thumbnail: string;
 }
 
 // ── Category DTO ─────────────────────────────────────────────────────────────
