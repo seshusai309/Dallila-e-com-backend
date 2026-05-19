@@ -35,20 +35,28 @@ export class StripeService {
   }
 
   // Create checkout session for order (redirect flow)
-  async createCheckoutSession(items: any[], successUrl: string, cancelUrl: string, metadata?: any): Promise<Stripe.Checkout.Session> {
+  async createCheckoutSession(items: any[], successUrl: string, cancelUrl: string, metadata?: any, discountPercent: number = 0): Promise<Stripe.Checkout.Session> {
     try {
-      const lineItems = items.map(item => ({
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: item.title,
-            description: `Quantity: ${item.quantity}`,
-            images: [item.thumbnail].filter(Boolean),
+      const multiplier = Math.max(0, 1 - (discountPercent || 0) / 100);
+      const lineItems = items.map(item => {
+        const discountedUnit = item.price * multiplier;
+        const descriptionParts = [`Quantity: ${item.quantity}`];
+        if (discountPercent > 0) {
+          descriptionParts.push(`Family discount ${discountPercent}% applied`);
+        }
+        return {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: item.title,
+              description: descriptionParts.join(' • '),
+              images: [item.thumbnail].filter(Boolean),
+            },
+            unit_amount: Math.round(discountedUnit * 100), // Convert to cents
           },
-          unit_amount: Math.round(item.price * 100), // Convert to cents
-        },
-        quantity: item.quantity,
-      }));
+          quantity: item.quantity,
+        };
+      });
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],

@@ -107,7 +107,7 @@ export class OrderService {
 
     // Validate products and get current prices
     const orderItems: OrderItem[] = [];
-    let totalAmount = 0;
+    let subtotalAmount = 0;
     let totalItems = 0;
 
     for (const cartItem of cart.items) {
@@ -133,14 +133,23 @@ export class OrderService {
         thumbnail: product.thumbnail,
       });
 
-      totalAmount += product.price * cartItem.quantity;
+      subtotalAmount += product.price * cartItem.quantity;
       totalItems += cartItem.quantity;
     }
+
+    // Apply buyer's family discount (snapshot at order time)
+    const buyer = await this.userRepository.findById(userId);
+    const discountPercent = buyer?.discountPercent ?? 0;
+    const discountAmount = Math.round(((subtotalAmount * discountPercent) / 100) * 100) / 100;
+    const totalAmount = Math.round((subtotalAmount - discountAmount) * 100) / 100;
 
     // Create order without payment intent ID first
     let order = await this.orderRepository.create({
       userId,
       items: orderItems,
+      subtotalAmount,
+      discountPercent,
+      discountAmount,
       totalAmount,
       totalItems,
       shippingAddress: {
@@ -169,6 +178,7 @@ export class OrderService {
             orderNumber: order.orderNumber,
             userId: userId,
           },
+          discountPercent,
         );
 
         checkoutSession = {
@@ -286,6 +296,7 @@ export class OrderService {
           orderNumber: order.orderNumber,
           userId: userId,
         },
+        order.discountPercent || 0,
       );
 
       const checkoutSession = {

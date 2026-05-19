@@ -39,6 +39,12 @@ export interface IUser extends Document {
   otp?: string;
   otpExpires?: Date;
   pendingUpdate?: any; // Temporary field for storing profile update data
+  discountPercent: number; // Family discount: starts at 5, +2 per added member (max 13)
+  familyHeadId?: mongoose.Types.ObjectId; // Set if this user is a member of someone else's family
+  familyInviteOtp?: string; // OTP for pending family invitation accepted via THIS user's email
+  familyInviteOtpExpires?: Date;
+  familyInviteInviterId?: mongoose.Types.ObjectId; // The head who sent the pending invite
+  familyInviteRelation?: string; // Relation chosen by inviter for pending invite
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,7 +83,13 @@ const userSchema = new Schema<IUser>({
   countryCode: { type: String },
   customerData: { type: customerDataSchema },
   otp: { type: String },
-  otpExpires: { type: Date }
+  otpExpires: { type: Date },
+  discountPercent: { type: Number, default: 5, min: 0, max: 13 },
+  familyHeadId: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  familyInviteOtp: { type: String },
+  familyInviteOtpExpires: { type: Date },
+  familyInviteInviterId: { type: Schema.Types.ObjectId, ref: 'User' },
+  familyInviteRelation: { type: String }
 }, { timestamps: true });
 
 export const User = mongoose.model<IUser>('User', userSchema);

@@ -96,6 +96,9 @@ export class ProfileResponseDto {
   addresses!: AddressResponseDto[];
 
   @Expose()
+  discountPercent!: number;
+
+  @Expose()
   createdAt!: Date;
 
   @Expose()

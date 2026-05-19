@@ -14,6 +14,7 @@ import wishlistRoutes from "./routes/wishlistRoutes";
 import orderRoutes from "./routes/orderRoutes";
 import ticketRoutes from "./routes/ticketRoutes";
 import reviewRoutes from "./routes/reviewRoutes";
+import familyRoutes from "./routes/familyRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -90,6 +91,7 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/family", familyRoutes);
 
 // Webhook routes (must be after raw body middleware)
 app.use("/api/webhooks", webhookRoutes);

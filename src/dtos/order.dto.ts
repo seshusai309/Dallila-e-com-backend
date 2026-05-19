@@ -66,6 +66,15 @@ export class OrderResponseDto extends BaseDto {
   orderStatus!: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
 
   @Expose()
+  subtotalAmount!: number;
+
+  @Expose()
+  discountPercent!: number;
+
+  @Expose()
+  discountAmount!: number;
+
+  @Expose()
   totalAmount!: number;
 
   @Expose()

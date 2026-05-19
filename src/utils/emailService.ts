@@ -230,6 +230,49 @@ export class EmailService {
     }
   }
 
+  // Send family invitation OTP email
+  async sendFamilyInvitationOTP(
+    email: string,
+    otp: string,
+    inviterName: string,
+    inviterEmail: string,
+    relation: string,
+  ): Promise<boolean> {
+    try {
+      const mailOptions = {
+        from: `"Aurelia Jewels" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Family Invitation - Aurelia Jewels',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">You've been invited to join a family</h2>
+            <p>Hi there,</p>
+            <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to be added as their <strong>${relation}</strong> in their Aurelia Jewels family group.</p>
+            <p>Once you verify with the OTP below, you will be permanently added to their family. This action cannot be undone by either of you.</p>
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 0; font-size: 18px;"><strong>Your verification OTP is:</strong></p>
+              <h1 style="color: #b8860b; font-size: 32px; margin: 10px 0; letter-spacing: 3px;">${otp}</h1>
+              <p style="margin: 0; color: #666;">This OTP will expire in 10 minutes.</p>
+            </div>
+            <p>If you didn't expect this invitation, please ignore this email — the OTP is required to complete the action.</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+            <p style="color: #666; font-size: 14px;">
+              This is an automated message from Aurelia Jewels.<br>
+              Please do not reply to this email.
+            </p>
+          </div>
+        `,
+      };
+
+      await this.transporter.sendMail(mailOptions);
+      logger.success('system', 'sendFamilyInvitationOTP', `Family invitation OTP sent to: ${email}`);
+      return true;
+    } catch (error: any) {
+      logger.error('system', 'sendFamilyInvitationOTP', `Failed to send family invitation OTP to ${email}: ${error.message}`);
+      return false;
+    }
+  }
+
   // Send delivery confirmation OTP email
   async sendDeliveryOTP(email: string, otp: string, orderNumber: string): Promise<boolean> {
     try {

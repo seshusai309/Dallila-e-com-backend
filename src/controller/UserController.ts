@@ -598,6 +598,7 @@ export class UserController {
         role: user.role,
         status: user.status,
         addresses: addressDtos,
+        discountPercent: user.discountPercent,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       }, { excludeExtraneousValues: true });

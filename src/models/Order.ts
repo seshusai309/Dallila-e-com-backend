@@ -21,7 +21,10 @@ export interface ShippingAddress {
 export interface Order extends Document {
   userId: string; // Required for logged-in users
   items: OrderItem[];
-  totalAmount: number;
+  subtotalAmount: number; // Sum of items before discount
+  discountPercent: number; // Family discount % applied at time of order
+  discountAmount: number; // Subtotal * discountPercent / 100
+  totalAmount: number; // Final payable: subtotalAmount - discountAmount
   totalItems: number;
   shippingAddress: ShippingAddress;
   paymentMethod: "ONLINE" | "COD";
@@ -65,6 +68,9 @@ const shippingAddressSchema = new Schema({
 const orderSchema = new Schema<Order>({
   userId: { type: String, required: true }, // Required for logged-in users only
   items: [orderItemSchema],
+  subtotalAmount: { type: Number, required: true, default: 0 },
+  discountPercent: { type: Number, required: true, default: 0 },
+  discountAmount: { type: Number, required: true, default: 0 },
   totalAmount: { type: Number, required: true },
   totalItems: { type: Number, required: true },
   shippingAddress: { type: shippingAddressSchema, required: true },
