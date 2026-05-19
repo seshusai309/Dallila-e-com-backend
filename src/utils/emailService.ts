@@ -5,13 +5,12 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
-    // Create transporter using Gmail SMTP
     this.transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: "saiseshawork@gmail.com",
-        pass: 'pyzb sxiv cnrp bsbb'
-      }
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
     });
   }
 
